@@ -37,7 +37,10 @@ class BreakoutVolatilityExpansionStrategy(IStrategy):
     
     # Minimal ROI (Managed by custom_exit)
     minimal_roi = {
-        "0": 100
+        "0": 0.355,
+        "87": 0.109,
+        "225": 0.02,
+        "390": 0
     }
 
     # Stoploss (Managed by custom_stoploss, safety net here)
@@ -62,28 +65,28 @@ class BreakoutVolatilityExpansionStrategy(IStrategy):
     # ============================================================================
 
     # --- Squeeze Parameters ---
-    bb_length = IntParameter(10, 30, default=20, space='buy', optimize=True)
-    bb_std = DecimalParameter(1.5, 2.5, default=2.0, decimals=1, space='buy', optimize=True)
-    kc_length = IntParameter(10, 30, default=20, space='buy', optimize=True)
-    kc_mult = DecimalParameter(1.0, 2.0, default=1.5, decimals=1, space='buy', optimize=True)
+    bb_length = IntParameter(10, 30, default=15, space='buy', optimize=True)
+    bb_std = DecimalParameter(1.5, 2.5, default=1.8, decimals=1, space='buy', optimize=True)
+    kc_length = IntParameter(10, 30, default=22, space='buy', optimize=True)
+    kc_mult = DecimalParameter(1.0, 2.0, default=1.0, decimals=1, space='buy', optimize=True)
     
     # --- Breakout Validation ---
-    breakout_volume_mult = DecimalParameter(1.0, 2.0, default=1.3, decimals=1, space='buy', optimize=True)
-    breakout_range_atr_mult = DecimalParameter(1.0, 3.0, default=1.5, decimals=1, space='buy', optimize=True)
-    min_squeeze_candles = IntParameter(1, 10, default=3, space='buy', optimize=True)
+    breakout_volume_mult = DecimalParameter(1.0, 2.0, default=1.1, decimals=1, space='buy', optimize=True)
+    breakout_range_atr_mult = DecimalParameter(1.0, 3.0, default=2.8, decimals=1, space='buy', optimize=True)
+    min_squeeze_candles = IntParameter(1, 10, default=10, space='buy', optimize=True)
     
     # --- Trend Filter ---
     use_trend_filter = CategoricalParameter([True, False], default=True, space='buy', optimize=True)
 
     # --- Risk Management ---
     tp1_risk_reward = DecimalParameter(0.8, 1.5, default=1.0, decimals=1, space='sell', optimize=True)
-    tp2_risk_reward = DecimalParameter(1.5, 3.0, default=2.0, decimals=1, space='sell', optimize=True)
-    tp1_close_percentage = DecimalParameter(0.2, 0.5, default=0.3, decimals=1, space='sell', optimize=True)
+    tp2_risk_reward = DecimalParameter(1.5, 3.0, default=2.2, decimals=1, space='sell', optimize=True)
+    tp1_close_percentage = DecimalParameter(0.2, 0.5, default=0.2, decimals=1, space='sell', optimize=True)
     
     # --- Missing Parameters Added ---
-    atr_stop_multiplier = DecimalParameter(1.0, 3.0, default=1.5, decimals=1, space='sell', optimize=True)
-    max_trade_duration_hours = IntParameter(4, 48, default=24, space='sell', optimize=True)
-    max_atr_spike = DecimalParameter(2.0, 5.0, default=3.0, decimals=1, space='sell', optimize=True)
+    atr_stop_multiplier = DecimalParameter(1.0, 3.0, default=1.2, decimals=1, space='sell', optimize=True)
+    max_trade_duration_hours = IntParameter(4, 48, default=36, space='sell', optimize=True)
+    max_atr_spike = DecimalParameter(2.0, 5.0, default=4.6, decimals=1, space='sell', optimize=True)
     
     # ============================================================================
     # INDICATORS
