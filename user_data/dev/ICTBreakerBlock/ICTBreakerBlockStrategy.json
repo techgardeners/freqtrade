@@ -1,0 +1,42 @@
+{
+  "strategy_name": "ICTBreakerBlockStrategy",
+  "params": {
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 3
+    },
+    "buy": {
+      "bb_confirmation_candles": 2,
+      "bb_return_threshold": 0.4,
+      "bos_lookback": 7,
+      "bos_threshold": 0.001,
+      "displacement_candles": 2,
+      "displacement_strength": 0.01,
+      "fvg_min_gap": 0.001,
+      "fvg_required": 0,
+      "ob_lookback": 19,
+      "ob_wick_ratio": 0.5,
+      "rsi_max": 70,
+      "rsi_min": 30,
+      "use_rsi_filter": 1,
+      "use_trend_filter": 1
+    },
+    "sell": {},
+    "protection": {},
+    "roi": {
+      "0": 0.05,
+      "30": 0.03,
+      "60": 0.02
+    },
+    "stoploss": {
+      "stoploss": -0.02
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-11-29 23:37:25.628485+00:00"
+}
