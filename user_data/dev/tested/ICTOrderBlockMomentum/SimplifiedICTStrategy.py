@@ -30,10 +30,13 @@ class SimplifiedICTStrategy(IStrategy):
     can_short = True
     
     minimal_roi = {
-        "0": 100
+        "0": 0.229,
+        "24": 0.106,
+        "64": 0.04,
+        "115": 0
     }
     
-    stoploss = -0.05
+    stoploss = -0.24
     trailing_stop = False
     process_only_new_candles = True
     
@@ -55,21 +58,21 @@ class SimplifiedICTStrategy(IStrategy):
         'exit': 'gtc'
     }
     
-    # Hyperopt Parameters
-    ema_fast = IntParameter(8, 20, default=12, space='buy', optimize=True)
+    # Hyperopt Parameters (Optimized)
+    ema_fast = IntParameter(8, 20, default=16, space='buy', optimize=True)
     ema_slow = IntParameter(20, 50, default=26, space='buy', optimize=True)
     
     # FVG minimum size (as % of ATR)
-    fvg_min_size = DecimalParameter(0.3, 1.0, default=0.5, space='buy', optimize=True)
+    fvg_min_size = DecimalParameter(0.3, 1.0, default=0.725, space='buy', optimize=True)
     
     # Momentum threshold (ROC)
-    momentum_threshold = DecimalParameter(0.5, 2.0, default=1.0, space='buy', optimize=True)
+    momentum_threshold = DecimalParameter(0.5, 2.0, default=1.347, space='buy', optimize=True)
     
     # Risk Reward
-    target_rr = DecimalParameter(2.0, 4.0, default=2.5, space='sell', optimize=True)
+    target_rr = DecimalParameter(2.0, 4.0, default=3.407, space='sell', optimize=True)
     
     # Risk per trade
-    risk_per_trade = DecimalParameter(0.005, 0.015, default=0.01, space='buy', optimize=True)
+    risk_per_trade = DecimalParameter(0.005, 0.015, default=0.014, space='buy', optimize=True)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
