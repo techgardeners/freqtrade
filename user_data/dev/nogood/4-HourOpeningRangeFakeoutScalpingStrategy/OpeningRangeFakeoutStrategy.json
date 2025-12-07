@@ -1,0 +1,36 @@
+{
+  "strategy_name": "OpeningRangeFakeoutStrategy",
+  "params": {
+    "roi": {
+      "0": 0.04,
+      "60": 0.02,
+      "180": 0.01,
+      "360": 0
+    },
+    "stoploss": {
+      "stoploss": -0.02
+    },
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 4
+    },
+    "buy": {
+      "atr_period": 14,
+      "atr_sl_multiplier": 1.614,
+      "bb_period": 30,
+      "bb_std": 2.757,
+      "max_stake_ratio": 0.4,
+      "risk_per_trade": 0.02
+    },
+    "sell": {
+      "target_rr": 2.543
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-12-06 18:40:52.975448+00:00"
+}

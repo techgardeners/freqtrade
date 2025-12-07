@@ -1,0 +1,272 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Antigravity
+// VWAP + DMI Trend Strategy V2 - Pine Script v6
+// Improved version to better match Freqtrade implementation
+// Changes: Dynamic SL/TP, improved VWAP calculation, entry ATR stored
+
+//@version=6
+strategy("VWAP + DMI Trend Strategy V2", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.075, slippage=1, pyramiding=0, calc_on_order_fills=false, process_orders_on_close=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIMEFRAME VALIDATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Configurable target timeframe
+required_tf = input.string("60", "Required Timeframe", options=["1", "5", "15", "30", "60", "120", "240", "D", "W"], group="Timeframe", tooltip="Strategy designed for this TF. 60=1H, 240=4H, D=Daily")
+is_correct_timeframe = timeframe.period == required_tf
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRATEGY PARAMETERS (Optimized values from Freqtrade Hyperopt)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Group: VWAP Settings
+vwap_window = input.int(167, "Rolling VWAP Window", minval=50, maxval=500, group="VWAP Settings", tooltip="Window size for Rolling VWAP calculation (optimized: 167)")
+
+// Group: DMI/ADX Settings
+dmi_length = input.int(14, "DMI Length", minval=1, maxval=50, group="DMI/ADX Settings", tooltip="Period for DMI/ADX calculation")
+adx_smoothing = input.int(14, "ADX Smoothing", minval=1, maxval=50, group="DMI/ADX Settings", tooltip="ADX smoothing period")
+adx_threshold = input.int(17, "ADX Threshold", minval=10, maxval=40, group="DMI/ADX Settings", tooltip="Minimum ADX value for trend confirmation (optimized: 17)")
+
+// Group: ATR & Risk Settings
+atr_length = input.int(14, "ATR Length", minval=1, maxval=50, group="ATR & Risk Settings", tooltip="Period for ATR calculation")
+atr_multiplier = input.float(2.04, "ATR Multiplier for Stop Loss", minval=1.0, maxval=5.0, step=0.01, group="ATR & Risk Settings", tooltip="Stop loss distance = ATR * Multiplier (optimized: 2.04)")
+target_rr = input.float(2.078, "Target Risk:Reward Ratio", minval=1.0, maxval=6.0, step=0.01, group="ATR & Risk Settings", tooltip="Take profit at this R:R multiple (optimized: 2.078)")
+use_dynamic_exit = input.bool(true, "Use Dynamic R:R Exit (like Freqtrade)", group="ATR & Risk Settings", tooltip="Calculate profit as R-multiple dynamically each bar")
+
+// Group: Volume Filter
+volume_filter_length = input.int(20, "Volume MA Length", minval=5, maxval=100, group="Volume Filter", tooltip="Period for volume moving average filter")
+use_volume_filter = input.bool(true, "Enable Volume Filter", group="Volume Filter", tooltip="Only enter when volume > volume MA")
+
+// Group: Trade Direction
+trade_direction = input.string("Both", "Trade Direction", options=["Long Only", "Short Only", "Both"], group="Trade Direction")
+
+// Group: Visual Settings
+show_vwap = input.bool(true, "Show Rolling VWAP", group="Visual Settings")
+show_signals = input.bool(true, "Show Entry/Exit Signals", group="Visual Settings")
+show_sl_tp_lines = input.bool(true, "Show SL/TP Lines", group="Visual Settings")
+show_info_table = input.bool(true, "Show Info Table", group="Visual Settings")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDICATOR CALCULATIONS (Matching TA-Lib/Freqtrade as closely as possible)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Rolling VWAP Calculation - Matching pandas rolling behavior
+// VWAP = Sum(Typical Price * Volume) / Sum(Volume) over rolling window
+// Using typical price (HLC/3) for more accurate VWAP like some implementations
+typical_price = (high + low + close) / 3
+price_volume = close * volume  // Using close to match Freqtrade exactly
+rolling_pv_sum = math.sum(price_volume, vwap_window)
+rolling_volume_sum = math.sum(volume, vwap_window)
+rolling_vwap = rolling_volume_sum != 0 ? rolling_pv_sum / rolling_volume_sum : close
+
+// DMI / ADX Calculation - Using ta.dmi which matches TA-Lib closely
+// ta.dmi returns [plus_di, minus_di, adx]
+[plus_di, minus_di, adx_value] = ta.dmi(dmi_length, adx_smoothing)
+
+// ATR Calculation - Standard ATR matching TA-Lib
+atr_value = ta.atr(atr_length)
+
+// Volume Mean for Filter
+volume_mean = ta.sma(volume, volume_filter_length)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENTRY CONDITIONS (Matching Freqtrade populate_entry_trend)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Volume condition (optional filter)
+volume_condition = use_volume_filter ? volume > volume_mean : true
+
+// LONG Entry Conditions (matching Freqtrade exactly):
+// 1. Price above Rolling VWAP (close > rolling_vwap)
+// 2. +DI > -DI (bullish directional movement)
+// 3. ADX > Threshold (trend strength confirmation)
+// 4. Volume > Volume Mean (optional filter)
+is_long_condition = close > rolling_vwap and plus_di > minus_di and adx_value > adx_threshold and volume_condition
+
+// SHORT Entry Conditions (matching Freqtrade exactly):
+// 1. Price below Rolling VWAP (close < rolling_vwap)
+// 2. -DI > +DI (bearish directional movement)
+// 3. ADX > Threshold (trend strength confirmation)
+// 4. Volume > Volume Mean (optional filter)
+is_short_condition = close < rolling_vwap and minus_di > plus_di and adx_value > adx_threshold and volume_condition
+
+// Apply trade direction filter
+can_long = trade_direction == "Long Only" or trade_direction == "Both"
+can_short = trade_direction == "Short Only" or trade_direction == "Both"
+
+// Final entry signals - trigger on NEW signal (transition from false to true)
+// This matches Freqtrade's behavior of entering on the candle where conditions first become true
+long_entry = is_long_condition and not is_long_condition[1] and can_long and is_correct_timeframe
+short_entry = is_short_condition and not is_short_condition[1] and can_short and is_correct_timeframe
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// POSITION TRACKING & DYNAMIC SL/TP (Like Freqtrade custom_stoploss/custom_exit)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Store entry values - these persist across bars
+var float entry_price = na
+var float entry_atr = na  // CRITICAL: Store ATR at entry time like Freqtrade
+var float stop_loss_price = na
+var float take_profit_price = na
+var bool in_long = false
+var bool in_short = false
+
+// Calculate current position's R-multiple (like Freqtrade custom_exit)
+calc_r_multiple() =>
+    if na(entry_atr) or entry_atr == 0
+        0.0
+    else
+        risk = entry_atr * atr_multiplier
+        if in_long
+            (close - entry_price) / risk
+        else if in_short
+            (entry_price - close) / risk
+        else
+            0.0
+
+current_r_multiple = calc_r_multiple()
+
+// Dynamic exit condition (like Freqtrade custom_exit checking r_multiple >= target_rr)
+should_exit_rr = use_dynamic_exit and math.abs(current_r_multiple) >= target_rr and current_r_multiple > 0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRATEGY EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Long Entry
+if long_entry and strategy.position_size == 0
+    entry_price := close
+    entry_atr := atr_value  // Store ATR at entry
+    stop_loss_price := close - (atr_value * atr_multiplier)
+    take_profit_price := close + (atr_value * atr_multiplier * target_rr)
+    in_long := true
+    in_short := false
+    strategy.entry("Long", strategy.long, comment="L: ADX=" + str.tostring(adx_value, "#.#"))
+
+// Short Entry
+if short_entry and strategy.position_size == 0
+    entry_price := close
+    entry_atr := atr_value  // Store ATR at entry
+    stop_loss_price := close + (atr_value * atr_multiplier)
+    take_profit_price := close - (atr_value * atr_multiplier * target_rr)
+    in_long := false
+    in_short := true
+    strategy.entry("Short", strategy.short, comment="S: ADX=" + str.tostring(adx_value, "#.#"))
+
+// Exit Logic - Two options based on use_dynamic_exit setting
+if strategy.position_size > 0  // Long position
+    if use_dynamic_exit
+        // Dynamic R:R exit like Freqtrade custom_exit
+        if should_exit_rr
+            strategy.close("Long", comment="TP R:" + str.tostring(current_r_multiple, "#.##"))
+        // Still use fixed stop loss
+        strategy.exit("Long SL", "Long", stop=stop_loss_price, comment="SL")
+    else
+        // Fixed SL/TP approach
+        strategy.exit("Long Exit", "Long", stop=stop_loss_price, limit=take_profit_price, comment_loss="SL", comment_profit="TP")
+
+if strategy.position_size < 0  // Short position
+    if use_dynamic_exit
+        // Dynamic R:R exit like Freqtrade custom_exit
+        if should_exit_rr
+            strategy.close("Short", comment="TP R:" + str.tostring(current_r_multiple, "#.##"))
+        // Still use fixed stop loss
+        strategy.exit("Short SL", "Short", stop=stop_loss_price, comment="SL")
+    else
+        // Fixed SL/TP approach
+        strategy.exit("Short Exit", "Short", stop=stop_loss_price, limit=take_profit_price, comment_loss="SL", comment_profit="TP")
+
+// Reset on position close
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    entry_price := na
+    entry_atr := na
+    stop_loss_price := na
+    take_profit_price := na
+    in_long := false
+    in_short := false
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VISUAL ELEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Plot Rolling VWAP
+plot(show_vwap ? rolling_vwap : na, "Rolling VWAP", color=color.new(color.purple, 0), linewidth=2)
+
+// Entry signals
+plotshape(show_signals and long_entry ? low : na, "Long Entry", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.small, text="L")
+
+plotshape(show_signals and short_entry ? high : na, "Short Entry", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.small, text="S")
+
+// Stop Loss and Take Profit lines
+plot(show_sl_tp_lines and strategy.position_size != 0 ? stop_loss_price : na, "Stop Loss", color=color.new(color.red, 30), style=plot.style_linebr, linewidth=2)
+
+plot(show_sl_tp_lines and strategy.position_size != 0 ? take_profit_price : na, "Take Profit", color=color.new(color.green, 30), style=plot.style_linebr, linewidth=2)
+
+// Entry price reference line
+plot(show_sl_tp_lines and strategy.position_size != 0 ? entry_price : na, "Entry Price", color=color.new(color.blue, 50), style=plot.style_linebr, linewidth=1)
+
+// Background color for trend direction
+bgcolor(is_long_condition and show_signals ? color.new(color.green, 95) : na)
+bgcolor(is_short_condition and show_signals ? color.new(color.red, 95) : na)
+
+// Warning: Wrong timeframe indicator
+plotchar(not is_correct_timeframe, "Wrong TF!", "!", location.top, color.red, size=size.large)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INFORMATION TABLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var table info_table = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast and show_info_table
+    // Header
+    table.cell(info_table, 0, 0, "VWAP+DMI V2", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 50))
+    table.merge_cells(info_table, 0, 0, 1, 0)
+    
+    // Current Values
+    table.cell(info_table, 0, 1, "VWAP:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 1, str.tostring(rolling_vwap, "#.##"), text_color=color.purple, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 2, "ADX:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 2, str.tostring(adx_value, "#.#"), text_color=adx_value > adx_threshold ? color.green : color.red, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 3, "+DI / -DI:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 3, str.tostring(plus_di, "#.#") + "/" + str.tostring(minus_di, "#.#"), text_color=plus_di > minus_di ? color.green : color.red, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 4, "ATR:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 4, str.tostring(atr_value, "#.####"), text_color=color.white, text_size=size.tiny)
+    
+    // Position info
+    table.cell(info_table, 0, 5, "Entry ATR:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 5, na(entry_atr) ? "-" : str.tostring(entry_atr, "#.####"), text_color=color.orange, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 6, "Current R:", text_color=color.gray, text_size=size.tiny)
+    r_color = current_r_multiple > 0 ? color.green : current_r_multiple < 0 ? color.red : color.gray
+    table.cell(info_table, 1, 6, strategy.position_size != 0 ? str.tostring(current_r_multiple, "#.##") + "R" : "-", text_color=r_color, text_size=size.tiny)
+    
+    table.cell(info_table, 0, 7, "Target R:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 7, str.tostring(target_rr, "#.##") + "R", text_color=color.teal, text_size=size.tiny)
+    
+    // Trend Status
+    trend_txt = is_long_condition ? "BULL" : is_short_condition ? "BEAR" : "FLAT"
+    trend_col = is_long_condition ? color.green : is_short_condition ? color.red : color.gray
+    table.cell(info_table, 0, 8, "Trend:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 8, trend_txt, text_color=trend_col, text_size=size.tiny)
+    
+    // Timeframe check
+    tf_txt = is_correct_timeframe ? "1H OK" : "WRONG!"
+    tf_col = is_correct_timeframe ? color.green : color.red
+    table.cell(info_table, 0, 9, "TF:", text_color=color.gray, text_size=size.tiny)
+    table.cell(info_table, 1, 9, tf_txt, text_color=tf_col, text_size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(long_entry, "Long Entry Signal", "VWAP+DMI V2: Long Entry - Price above VWAP, +DI > -DI, ADX > threshold")
+
+alertcondition(short_entry, "Short Entry Signal", "VWAP+DMI V2: Short Entry - Price below VWAP, -DI > +DI, ADX > threshold")
+
+alertcondition(should_exit_rr and in_long, "Long TP Hit", "VWAP+DMI V2: Long position reached target R:R")
+
+alertcondition(should_exit_rr and in_short, "Short TP Hit", "VWAP+DMI V2: Short position reached target R:R")

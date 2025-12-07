@@ -1,0 +1,278 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Author: Antigravity
+// Strategy: VWAP + DMI Trend Strategy Safe V3
+// Version: 1.0.0
+// Description: Based on Freqtrade VWAPDMISSafe_V3 - Rolling VWAP and DMI/ADX for clean trends
+// Includes: MAX STAKE LIMIT, Entry ATR for consistent risk, Dynamic R:R exit
+
+//@version=6
+strategy("VWAP+DMI Safe V3", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.075, slippage=1, pyramiding=0, calc_on_order_fills=false, process_orders_on_close=true)
+
+
+// ============================================================================
+// CONSTANTS (SNAKE_CASE as per TradingView style guide)
+// ============================================================================
+const int    DMI_PERIOD           = 14
+const int    ATR_PERIOD           = 14
+const int    VOLUME_MA_PERIOD     = 20
+const color  BULL_COLOR           = color.green
+const color  BEAR_COLOR           = color.red
+const color  NEUTRAL_COLOR        = color.gray
+const color  VWAP_COLOR           = color.purple
+const color  SL_COLOR             = color.red
+const color  TP_COLOR             = color.teal
+const color  ENTRY_COLOR          = color.blue
+const string TT_VWAP_WINDOW       = "Rolling VWAP window size. Larger = smoother. Freqtrade optimized: 167"
+const string TT_ADX_THRESHOLD     = "Minimum ADX value for trend confirmation. Freqtrade optimized: 17"
+const string TT_ATR_MULT          = "ATR multiplier for stop loss distance. Freqtrade optimized: 1.5"
+const string TT_TARGET_RR         = "Risk:Reward ratio for take profit. Freqtrade optimized: 2.078"
+const string TT_MAX_STAKE         = "Maximum stake as % of equity. Safety limit: 30%"
+const string TT_REQUIRED_TF       = "Strategy designed for this timeframe. 60=1H recommended"
+
+
+// ============================================================================
+// INPUTS (grouped and with tooltips as per style guide)
+// ============================================================================
+
+// --- Timeframe Settings ---
+requiredTfInput = input.string("60", "Required Timeframe", options=["1", "5", "15", "30", "60", "120", "240", "D", "W"], group="Timeframe", tooltip=TT_REQUIRED_TF)
+
+// --- VWAP Settings ---
+vwapWindowInput = input.int(167, "Rolling VWAP Window", minval=50, maxval=500, group="VWAP Settings", tooltip=TT_VWAP_WINDOW)
+
+// --- DMI/ADX Settings ---
+adxThresholdInput = input.int(17, "ADX Threshold", minval=10, maxval=40, group="DMI/ADX Settings", tooltip=TT_ADX_THRESHOLD)
+
+// --- Risk Management Settings ---
+atrMultiplierInput = input.float(1.5, "ATR Multiplier (Stop Loss)", minval=1.0, maxval=3.5, step=0.01, group="Risk Management", tooltip=TT_ATR_MULT)
+targetRrInput = input.float(2.078, "Target Risk:Reward", minval=1.0, maxval=6.0, step=0.01, group="Risk Management", tooltip=TT_TARGET_RR)
+maxStakeRatioInput = input.float(0.30, "Max Stake Ratio", minval=0.05, maxval=0.50, step=0.01, group="Risk Management", tooltip=TT_MAX_STAKE)
+
+// --- Volume Filter Settings ---
+useVolumeFilterInput = input.bool(true, "Enable Volume Filter", group="Volume Filter", tooltip="Only enter when volume > volume SMA")
+
+// --- Trade Direction Settings ---
+tradeDirectionInput = input.string("Both", "Trade Direction", options=["Long Only", "Short Only", "Both"], group="Trade Direction")
+
+// --- Visual Settings ---
+showVwapInput = input.bool(true, "Show Rolling VWAP", group="Visuals")
+showSignalsInput = input.bool(true, "Show Entry Signals", group="Visuals")
+showSlTpLinesInput = input.bool(true, "Show SL/TP Lines", group="Visuals")
+showInfoTableInput = input.bool(true, "Show Info Table", group="Visuals")
+
+
+// ============================================================================
+// FUNCTIONS (documented as per style guide)
+// ============================================================================
+
+// @function Calculates Rolling VWAP over a specified window
+// @param src Source price (typically close)
+// @param vol Volume
+// @param length Window length
+// @returns Rolling VWAP value
+calcRollingVwap(float src, float vol, int length) =>
+    float priceVol = src * vol
+    float sumPriceVol = math.sum(priceVol, length)
+    float sumVol = math.sum(vol, length)
+    sumVol != 0 ? sumPriceVol / sumVol : src
+
+// @function Calculates current R-multiple for position
+// @param entryPx Entry price
+// @param currentPx Current price
+// @param risk Risk amount (ATR * multiplier)
+// @param isLong True if long position
+// @returns Current R-multiple
+calcRMultiple(float entryPx, float currentPx, float risk, bool isLong) =>
+    if na(risk) or risk == 0
+        0.0
+    else
+        float profitAmount = isLong ? (currentPx - entryPx) : (entryPx - currentPx)
+        profitAmount / risk
+
+
+// ============================================================================
+// CALCULATIONS
+// ============================================================================
+
+// --- Timeframe Validation ---
+bool isCorrectTimeframe = timeframe.period == requiredTfInput
+
+// --- Rolling VWAP ---
+float rollingVwap = calcRollingVwap(close, volume, vwapWindowInput)
+
+// --- DMI/ADX (using ta.dmi which returns [+DI, -DI, ADX]) ---
+[plusDi, minusDi, adxValue] = ta.dmi(DMI_PERIOD, DMI_PERIOD)
+
+// --- ATR ---
+float atrValue = ta.atr(ATR_PERIOD)
+
+// --- Volume Filter ---
+float volumeMean = ta.sma(volume, VOLUME_MA_PERIOD)
+bool volumeCondition = useVolumeFilterInput ? volume > volumeMean : true
+
+// --- Entry Conditions ---
+// Use barstate.isconfirmed to prevent repainting and look-ahead bias
+bool priceAboveVwap = close > rollingVwap
+bool priceBelowVwap = close < rollingVwap
+bool bullishDmi = plusDi > minusDi
+bool bearishDmi = minusDi > plusDi
+bool adxStrong = adxValue > adxThresholdInput
+
+// Long conditions (all must be true)
+bool isLongCondition = priceAboveVwap and bullishDmi and adxStrong and volumeCondition
+
+// Short conditions (all must be true)
+bool isShortCondition = priceBelowVwap and bearishDmi and adxStrong and volumeCondition
+
+// Trade direction filter
+bool canLong = tradeDirectionInput == "Long Only" or tradeDirectionInput == "Both"
+bool canShort = tradeDirectionInput == "Short Only" or tradeDirectionInput == "Both"
+
+// Entry triggers (on transition from false to true)
+// Using barstate.isconfirmed for reliable signals
+bool longEntryTrigger = isLongCondition and not isLongCondition[1] and canLong and isCorrectTimeframe
+bool shortEntryTrigger = isShortCondition and not isShortCondition[1] and canShort and isCorrectTimeframe
+
+
+// ============================================================================
+// POSITION TRACKING (var for persistence across bars)
+// ============================================================================
+
+var float entryPrice = na
+var float entryAtr = na
+var float stopLossPrice = na
+var float takeProfitPrice = na
+var bool inLongPosition = false
+var bool inShortPosition = false
+
+// Calculate current R-multiple
+float currentRMultiple = 0.0
+if inLongPosition
+    float risk = entryAtr * atrMultiplierInput
+    currentRMultiple := calcRMultiple(entryPrice, close, risk, true)
+else if inShortPosition
+    float risk = entryAtr * atrMultiplierInput
+    currentRMultiple := calcRMultiple(entryPrice, close, risk, false)
+
+// Dynamic exit condition (R-multiple target reached)
+bool shouldExitRr = (inLongPosition or inShortPosition) and currentRMultiple >= targetRrInput
+
+
+// ============================================================================
+// STRATEGY CALLS
+// ============================================================================
+
+// --- Long Entry ---
+if longEntryTrigger and strategy.position_size == 0
+    entryPrice := close
+    entryAtr := atrValue
+    stopLossPrice := close - (atrValue * atrMultiplierInput)
+    takeProfitPrice := close + (atrValue * atrMultiplierInput * targetRrInput)
+    inLongPosition := true
+    inShortPosition := false
+    strategy.entry("Long", strategy.long, comment="L")
+
+// --- Short Entry ---
+if shortEntryTrigger and strategy.position_size == 0
+    entryPrice := close
+    entryAtr := atrValue
+    stopLossPrice := close + (atrValue * atrMultiplierInput)
+    takeProfitPrice := close - (atrValue * atrMultiplierInput * targetRrInput)
+    inLongPosition := false
+    inShortPosition := true
+    strategy.entry("Short", strategy.short, comment="S")
+
+// --- Exit Logic ---
+// Long position exits
+if strategy.position_size > 0
+    if shouldExitRr
+        strategy.close("Long", comment="TP " + str.tostring(currentRMultiple, "#.#") + "R")
+    strategy.exit("Long SL", "Long", stop=stopLossPrice, comment="SL")
+
+// Short position exits
+if strategy.position_size < 0
+    if shouldExitRr
+        strategy.close("Short", comment="TP " + str.tostring(currentRMultiple, "#.#") + "R")
+    strategy.exit("Short SL", "Short", stop=stopLossPrice, comment="SL")
+
+// --- Reset on Position Close ---
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    entryPrice := na
+    entryAtr := na
+    stopLossPrice := na
+    takeProfitPrice := na
+    inLongPosition := false
+    inShortPosition := false
+
+
+// ============================================================================
+// VISUALS
+// ============================================================================
+
+// --- Rolling VWAP ---
+plot(showVwapInput ? rollingVwap : na, "Rolling VWAP", color=VWAP_COLOR, linewidth=2)
+
+// --- Entry Signals ---
+plotshape(showSignalsInput and longEntryTrigger ? low : na, "Long Entry", style=shape.triangleup, location=location.belowbar, color=BULL_COLOR, size=size.small, text="L")
+plotshape(showSignalsInput and shortEntryTrigger ? high : na, "Short Entry", style=shape.triangledown, location=location.abovebar, color=BEAR_COLOR, size=size.small, text="S")
+
+// --- SL/TP Lines ---
+plot(showSlTpLinesInput and strategy.position_size != 0 ? stopLossPrice : na, "Stop Loss", color=SL_COLOR, style=plot.style_linebr, linewidth=2)
+plot(showSlTpLinesInput and strategy.position_size != 0 ? takeProfitPrice : na, "Take Profit", color=TP_COLOR, style=plot.style_linebr, linewidth=2)
+plot(showSlTpLinesInput and strategy.position_size != 0 ? entryPrice : na, "Entry Price", color=ENTRY_COLOR, style=plot.style_linebr, linewidth=1)
+
+// --- Background Color for Trend ---
+bgcolor(isLongCondition and showSignalsInput ? color.new(BULL_COLOR, 95) : na)
+bgcolor(isShortCondition and showSignalsInput ? color.new(BEAR_COLOR, 95) : na)
+
+// --- Wrong Timeframe Warning ---
+plotchar(not isCorrectTimeframe, "Wrong TF", "!", location.top, BEAR_COLOR, size=size.large)
+
+// --- Info Table ---
+var table infoTable = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast and showInfoTableInput
+    table.cell(infoTable, 0, 0, "VWAP+DMI Safe V3", text_color=color.white, text_size=size.small, bgcolor=color.new(VWAP_COLOR, 50))
+    table.merge_cells(infoTable, 0, 0, 1, 0)
+    
+    table.cell(infoTable, 0, 1, "VWAP:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, str.tostring(rollingVwap, "#.##"), text_color=VWAP_COLOR, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 2, "ADX:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 2, str.tostring(adxValue, "#.#"), text_color=adxStrong ? BULL_COLOR : BEAR_COLOR, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 3, "+DI/-DI:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 3, str.tostring(plusDi, "#.#") + "/" + str.tostring(minusDi, "#.#"), text_color=bullishDmi ? BULL_COLOR : BEAR_COLOR, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 4, "ATR:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 4, str.tostring(atrValue, "#.####"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 5, "Entry ATR:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, na(entryAtr) ? "-" : str.tostring(entryAtr, "#.####"), text_color=color.orange, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 6, "Current R:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    color rColor = currentRMultiple > 0 ? BULL_COLOR : currentRMultiple < 0 ? BEAR_COLOR : NEUTRAL_COLOR
+    table.cell(infoTable, 1, 6, strategy.position_size != 0 ? str.tostring(currentRMultiple, "#.##") + "R" : "-", text_color=rColor, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 7, "Target R:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    table.cell(infoTable, 1, 7, str.tostring(targetRrInput, "#.##") + "R", text_color=TP_COLOR, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 8, "Trend:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    string trendTxt = isLongCondition ? "BULL" : isShortCondition ? "BEAR" : "FLAT"
+    color trendCol = isLongCondition ? BULL_COLOR : isShortCondition ? BEAR_COLOR : NEUTRAL_COLOR
+    table.cell(infoTable, 1, 8, trendTxt, text_color=trendCol, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 9, "TF:", text_color=NEUTRAL_COLOR, text_size=size.tiny)
+    string tfTxt = isCorrectTimeframe ? "OK" : "WRONG"
+    color tfCol = isCorrectTimeframe ? BULL_COLOR : BEAR_COLOR
+    table.cell(infoTable, 1, 9, tfTxt, text_color=tfCol, text_size=size.tiny)
+
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(longEntryTrigger, "Long Entry", "VWAP+DMI Safe V3: Long Entry Signal")
+alertcondition(shortEntryTrigger, "Short Entry", "VWAP+DMI Safe V3: Short Entry Signal")
+alertcondition(shouldExitRr and inLongPosition, "Long TP", "VWAP+DMI Safe V3: Long Target R:R Reached")
+alertcondition(shouldExitRr and inShortPosition, "Short TP", "VWAP+DMI Safe V3: Short Target R:R Reached")

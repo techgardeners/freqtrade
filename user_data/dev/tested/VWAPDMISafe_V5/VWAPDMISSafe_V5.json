@@ -1,0 +1,12 @@
+{
+    "strategy_name": "VWAPDMISSafe_V5",
+    "params": {
+        "buy": {
+            "use_volatility_regime": true,
+            "use_trend_strength_regime": true,
+            "use_direction_regime": true,
+            "use_volume_regime": true
+        }
+    },
+    "ft_stratparam_v": 1
+}

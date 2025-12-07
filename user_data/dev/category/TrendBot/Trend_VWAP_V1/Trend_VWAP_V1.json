@@ -1,0 +1,36 @@
+{
+  "strategy_name": "Trend_VWAP_V1",
+  "params": {
+    "roi": {
+      "0": 100
+    },
+    "stoploss": {
+      "stoploss": -0.247
+    },
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 2
+    },
+    "buy": {
+      "adx_threshold": 29,
+      "atr_multiplier": 1.785,
+      "max_stake_ratio": 0.153,
+      "regime_adx_threshold": 21,
+      "regime_atr_threshold": 1.31,
+      "regime_min_score": 3,
+      "risk_per_trade": 0.012,
+      "vwap_window": 300
+    },
+    "sell": {
+      "target_rr": 3.83
+    },
+    "protection": {}
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-12-06 23:49:14.512386+00:00"
+}

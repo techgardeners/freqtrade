@@ -1,0 +1,38 @@
+{
+  "strategy_name": "FiveMinScalpingStrategy",
+  "params": {
+    "roi": {
+      "0": 0.03,
+      "30": 0.02,
+      "60": 0.01,
+      "120": 0
+    },
+    "stoploss": {
+      "stoploss": -0.02
+    },
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 4
+    },
+    "buy": {
+      "atr_multiplier": 2.363,
+      "atr_period": 15,
+      "ema_fast": 9,
+      "ema_medium": 58,
+      "ema_slow": 203,
+      "max_stake_ratio": 0.393,
+      "risk_per_trade": 0.006,
+      "rsi_threshold": 48
+    },
+    "sell": {
+      "target_rr": 1.939
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-12-06 18:12:32.940628+00:00"
+}

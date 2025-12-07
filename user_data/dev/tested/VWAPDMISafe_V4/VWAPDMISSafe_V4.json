@@ -1,0 +1,44 @@
+{
+  "strategy_name": "VWAPDMISSafe_V4",
+  "params": {
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 6
+    },
+    "buy": {
+      "adx_threshold": 23,
+      "atr_multiplier": 2.214,
+      "atr_percentile": 52,
+      "max_stake_ratio": 0.304,
+      "risk_per_trade": 0.013,
+      "rsi_long_threshold": 50,
+      "rsi_period": 18,
+      "rsi_short_threshold": 53,
+      "trend_ema_period": 277,
+      "use_rsi_filter": false,
+      "use_trend_filter": true,
+      "use_volatility_filter": true,
+      "vwap_window": 122
+    },
+    "sell": {
+      "target_rr": 1.771
+    },
+    "protection": {},
+    "roi": {
+      "0": 0.433,
+      "360": 0.164,
+      "545": 0.029,
+      "1859": 0
+    },
+    "stoploss": {
+      "stoploss": -0.337
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-12-06 21:12:01.144000+00:00"
+}
