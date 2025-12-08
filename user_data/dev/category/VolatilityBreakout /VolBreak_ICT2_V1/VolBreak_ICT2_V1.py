@@ -14,7 +14,7 @@ import talib.abstract as ta
 import pandas_ta as pta
 
 
-class SimplifiedICTStrategy(IStrategy):
+class VolBreak_ICT2_V1(IStrategy):
     """
     Simplified ICT-Inspired Strategy
     Author: Antigravity
@@ -30,9 +30,9 @@ class SimplifiedICTStrategy(IStrategy):
     timeframe = "5m"
     can_short = True
 
-    minimal_roi = {"0": 0.208, "30": 0.056, "70": 0.012, "147": 0}
+    minimal_roi = {"0": 0.229, "24": 0.106, "64": 0.04, "115": 0}
 
-    stoploss = -0.025
+    stoploss = -0.24
     trailing_stop = False
     process_only_new_candles = True
 
@@ -52,20 +52,20 @@ class SimplifiedICTStrategy(IStrategy):
     order_time_in_force = {"entry": "gtc", "exit": "gtc"}
 
     # Hyperopt Parameters (Optimized)
-    ema_fast = IntParameter(8, 20, default=18, space="buy", optimize=True)
-    ema_slow = IntParameter(20, 50, default=37, space="buy", optimize=True)
+    ema_fast = IntParameter(8, 20, default=16, space="buy", optimize=True)
+    ema_slow = IntParameter(20, 50, default=26, space="buy", optimize=True)
 
     # FVG minimum size (as % of ATR)
-    fvg_min_size = DecimalParameter(0.3, 1.0, default=0.91, space="buy", optimize=True)
+    fvg_min_size = DecimalParameter(0.3, 1.0, default=0.725, space="buy", optimize=True)
 
     # Momentum threshold (ROC)
-    momentum_threshold = DecimalParameter(0.5, 2.0, default=1.935, space="buy", optimize=True)
+    momentum_threshold = DecimalParameter(0.5, 2.0, default=1.347, space="buy", optimize=True)
 
     # Risk Reward
-    target_rr = DecimalParameter(2.0, 4.0, default=3.531, space="sell", optimize=True)
+    target_rr = DecimalParameter(2.0, 4.0, default=3.407, space="sell", optimize=True)
 
     # Risk per trade
-    risk_per_trade = DecimalParameter(0.005, 0.015, default=0.013, space="buy", optimize=True)
+    risk_per_trade = DecimalParameter(0.005, 0.015, default=0.014, space="buy", optimize=True)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """

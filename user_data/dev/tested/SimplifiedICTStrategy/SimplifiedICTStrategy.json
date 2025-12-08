@@ -1,0 +1,36 @@
+{
+  "strategy_name": "SimplifiedICTStrategy",
+  "params": {
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 3
+    },
+    "buy": {
+      "ema_fast": 18,
+      "ema_slow": 37,
+      "fvg_min_size": 0.91,
+      "momentum_threshold": 1.935,
+      "risk_per_trade": 0.013
+    },
+    "sell": {
+      "target_rr": 3.531
+    },
+    "protection": {},
+    "roi": {
+      "0": 0.208,
+      "30": 0.056,
+      "70": 0.012,
+      "147": 0
+    },
+    "stoploss": {
+      "stoploss": -0.025
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2025-12-07 03:50:54.284947+00:00"
+}

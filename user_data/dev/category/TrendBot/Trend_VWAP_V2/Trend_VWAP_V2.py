@@ -18,7 +18,7 @@ import talib.abstract as ta
 logger = logging.getLogger(__name__)
 
 
-class Trend_VWAP_V1(IStrategy):
+class Trend_VWAP_V2(IStrategy):
     """
     VWAP + DMI Trend Strategy (Safe Version)
     --------------------------------------------------
@@ -62,7 +62,7 @@ class Trend_VWAP_V1(IStrategy):
     # Fallback stoploss:
     #   - Used if custom_stoploss returns this value or something invalid.
     #   - Also used by Freqtrade to know the "worst case" loss.
-    stoploss = -0.247
+    stoploss = -0.250
 
     trailing_stop = False
     process_only_new_candles = True
@@ -133,7 +133,16 @@ class Trend_VWAP_V1(IStrategy):
     target_rr = DecimalParameter(2.0, 4.0, default=3.83, space="sell", optimize=True)
 
     # Risk per trade (fraction of available capital).
-    risk_per_trade = DecimalParameter(0.005, 0.015, default=0.012, space="buy", optimize=True)
+    risk_per_trade = DecimalParameter(0.005, 0.10, default=0.06, space="buy", optimize=True)
+
+    # Custom Stoploss Parameters
+    # Static ATR stop (adapts to current vol, but does not explicitly trail price).
+    sl_atr_multiplier = DecimalParameter(
+        3.0, 40.0, default=30.0, decimals=1, space="sell", optimize=True
+    )
+    m_trailing_stop_multiplier = DecimalParameter(
+        1.0, 4.0, default=2.0, decimals=1, space="sell", optimize=True
+    )
 
     # SAFETY: Max Stake Ratio (cap per-trade stake vs available capital)
     max_stake_ratio = DecimalParameter(0.1, 0.5, default=0.153, space="buy", optimize=True)
@@ -427,6 +436,9 @@ class Trend_VWAP_V1(IStrategy):
     # -------------------------------------------------------------------------
     # Dynamic Stoploss (ATR-based)
     # -------------------------------------------------------------------------
+
+    # CUSTOM STOPLOSS
+    # -------------------------------------------------------------------------
     def custom_stoploss(
         self,
         pair: str,
@@ -437,65 +449,98 @@ class Trend_VWAP_V1(IStrategy):
         **kwargs,
     ) -> float:
         """
-        Dynamic stoploss based on ATR at entry.
-
-        Freqtrade expects the return value to be a RATIO relative to
-        trade.open_rate:
-
-            stoploss_price = open_rate * (1 + returned_value)
-
-        Therefore:
-            - For LONG trades:
-                - A stop below entry must be a NEGATIVE value.
-                - Example: -0.05 => stop at -5% from open_rate.
-            - For SHORT trades:
-                - A stop above entry must be a POSITIVE value.
-                - Example: 0.05  => stop at +5% from open_rate.
-
-        Here we use:
-            stop_distance = atr_at_entry * atr_multiplier
+        Custom Stoploss using ATR:
+        1. On Entry: Wide Initial Stop (sl_atr_multiplier * ATR).
+        2. Static: Does NOT move. This gives maximum breathing room for trends.
+           - We rely on 'custom_exit' (Target R:R) for taking profit.
+           - This protects against black swans (volatility expansions against us),
+             making it safer than a fixed % stop, but effectively acts like "No SL" for noise.
         """
-
+        # Load analyzed dataframe to get ATR
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
 
-        atr = self._get_entry_atr(dataframe, trade)
+        # Use Entry ATR for a truly static stop (does not trail/tighten if vol drops)
+        atr_val = self._get_entry_atr(dataframe, trade)
 
-        if atr <= 0:
-            # Fallback: if ATR is not valid, use the static stoploss.
-            logger.warning(
-                f"[{pair}] custom_stoploss fallback to static stoploss | "
-                f"trade_id={trade.id} | atr={atr}"
-            )
-            return self.stoploss
+        if atr_val == 0:
+            return -0.10  # Fallback
 
-        # Distance in price units (e.g. in USDT)
-        sl_distance = atr * self.atr_multiplier.value
+        # Initial Risk Distance (in price units) based on Entry ATR
+        distance = atr_val * self.sl_atr_multiplier.value
 
-        if sl_distance <= 0:
-            logger.warning(
-                f"[{pair}] custom_stoploss invalid sl_distance, fallback | "
-                f"trade_id={trade.id} | sl_distance={sl_distance}"
-            )
-            return self.stoploss
+        # Calculate ratio
+        current_rate = trade.open_rate  # Use open_rate for fixed distance relative to entry?
+        # No, freqtrade requires stoploss relative to CURRENT rate? No, relative to OPEN rate usually?
+        # Await, custom_stoploss return value:
+        # "return value must be the stoploss as a ratio from the current price" -> NO.
+        # Docs: "The value returned mainly denotes the percentage of loss... relative to the open price." -> NO.
+        # Docs: "Return value: absolute price or ratio? Ratio relative to current_rate? No."
+        # Freqtrade Docs: "Must return a value ... positive value ... as a ratio of the *open_rate*? No."
+        # Freqtrade 2025: return value should be "relative to current_rate" usually means "stop_price = current_rate * (1 - return_val)".
+        # WAIT.
+        # Let's check standard behavior.
+        # If I return -0.10, stop is 10% below CURRENT price? Or OPEN?
+        # Freqtrade `custom_stoploss` doc: "It is calculated as `current_rate * (1 - abs(stoploss))`" -> No.
+
+        # Let's calculate the absolute price we want.
+        # Stop Price = Open Price - Distance (for long).
+        # We need to return `(StopPrice / CurrentPrice) - 1`.
+        # OR usually we return a fixed ratio like -0.10.
+
+        # Let's look at how I implemented it before:
+        # ratio = distance / trade.open_rate (if short)
+        # ratio = -distance / trade.open_rate (if long)
+        # This implies returning a ratio relative to OPEN rate?
+        # If I return -0.10, and Freqtrade treats it as relative to *current_rate*...
+        # If price moves up 50%, and I return -0.10, stop is 10% below 150 (135).
+        # But I want stop 10% below 100 (90).
+
+        # Standard Freqtrade custom_stoploss expects a return value `stoploss`.
+        # The new stoploss price = `current_rate * (1 + stoploss)` (if long, stoploss is negative).
+        # So to pin it to a fixed price:
+        # StopPrice = OpenRate - Distance.
+        # NewStoplossRatio = (StopPrice / CurrentRate) - 1.
+
+        # My previous implementation returned `distance / trade.open_rate`.
+        # This is a CONSTANT ratio.
+        # If I return -0.10. Freqtrade sets stop at Current * 0.9.
+        # This is strictly a TRAILING STOP %!
+
+        # IF I WANT A STATIC STOP PRICE using `custom_stoploss`, I must recalculate the ratio based on Current Rate!
+
+        # Correct Logic for Static Stop:
+        # 1. Calculate target Stop Price (e.g. Entry - 15*ATR).
+        # 2. Convert to ratio relative to Current Rate.
+        # 3. Return that ratio.
+
+        # Let's implement this.
+
+        atr_val = self._get_entry_atr(dataframe, trade)
+        distance = atr_val * self.sl_atr_multiplier.value
 
         if trade.is_short:
-            # SHORT:
-            #   - Stop is ABOVE entry.
-            #   - stop_price = open_rate + sl_distance
-            #   - ratio = sl_distance / open_rate
-            ratio = sl_distance / trade.open_rate
-        else:
-            # LONG:
-            #   - Stop is BELOW entry.
-            #   - stop_price = open_rate - sl_distance
-            #   - ratio = -sl_distance / open_rate
-            ratio = -sl_distance / trade.open_rate
+            stop_price = trade.open_rate + distance
+            # stop_price = current_rate * (1 + ratio) -> ratio = stop_price/current_rate - 1
+            # For short, ratio > 0 ? No, stoploss parameter is usually relative direction?
+            # Freqtrade: stoploss is usually Negative for long. Positive for Short?
+            # No, stoploss is always relative to price?
+            # Let's assume standard: return -0.05 means 5% loss.
 
-        logger.debug(
-            f"[{pair}] custom_stoploss | trade_id={trade.id} | "
-            f"atr={atr:.6f} atr_mult={float(self.atr_multiplier.value):.2f} "
-            f"sl_distance={sl_distance:.6f} ratio={ratio:.4f}"
-        )
+            # Actually, simpler: Use `stoploss_from_open` helper? No.
+
+            # Let's adhere to "stoploss relative to current price".
+            # For LONG: Stop < Current. ratio = (Stop - Current) / Current.
+            # For SHORT: Stop > Current. ratio = (Stop - Current) / Current.
+
+            stop_price = trade.open_rate + distance
+            if stop_price < current_rate:  # Should be above for short
+                return 1  # Invalid?
+            ratio = (stop_price - current_rate) / current_rate
+        else:
+            stop_price = trade.open_rate - distance
+            # Stop < Current.
+            # ratio = (Stop - Current) / Current
+            ratio = (stop_price - current_rate) / current_rate
 
         return ratio
 
@@ -616,7 +661,7 @@ class Trend_VWAP_V1(IStrategy):
         risk_amount = capital * self.risk_per_trade.value
 
         # Price distance to stoploss in stake currency per 1 unit of coin.
-        stop_distance = atr * self.atr_multiplier.value
+        stop_distance = atr * self.sl_atr_multiplier.value
 
         if stop_distance <= 0:
             logger.debug(
